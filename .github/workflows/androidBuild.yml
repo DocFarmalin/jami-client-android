@@ -49,19 +49,28 @@ jobs:
           yes | "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" --licenses
         shell: bash
 
-      - name: Install Android platform & build-tools
+      - name: Install Android platform, build-tools and CMake (required)
         run: |
           export PATH="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools:${PATH}"
-          "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" "platform-tools" \
-            "platforms;android-${ANDROID_API}" "build-tools;${BUILD_TOOLS_VERSION}"
+          # platform-tools и build-tools
+          "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" "platform-tools" "platforms;android-${ANDROID_API}" "build-tools;${BUILD_TOOLS_VERSION}"
+          # Устанавливаем конкретную версию CMake, которую просит Gradle/AGP
+          # (имя пакета — "cmake;4.1.0")
+          "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" "cmake;4.1.0"
+          # по желанию: установить NDK (если проект использует NDK)
+          # Uncomment следующую строку и при необходимости укажите нужную версию NDK:
+          # "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" "ndk;25.2.9519653"
           "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" --list_installed || true
+          # покажем, что установлено
+          ls -la "${ANDROID_SDK_ROOT}/cmake" || true
         shell: bash
 
-      - name: Export SDK env to job
+      - name: Export SDK env to job (including CMake in PATH)
         run: |
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}" >> $GITHUB_ENV
           echo "ANDROID_HOME=${ANDROID_SDK_ROOT}" >> $GITHUB_ENV
-          echo "PATH=${ANDROID_SDK_ROOT}/platform-tools:${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${PATH}" >> $GITHUB_ENV
+          # добавляем CMake (если установлена версия 4.1.0) в PATH, чтобы Gradle ее нашёл
+          echo "PATH=${ANDROID_SDK_ROOT}/cmake/4.1.0/bin:${ANDROID_SDK_ROOT}/platform-tools:${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${PATH}" >> $GITHUB_ENV
         shell: bash
 
       - name: Print Java & Ant versions
