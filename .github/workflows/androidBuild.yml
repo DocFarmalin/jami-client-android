@@ -1,92 +1,97 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<project name="Tests" default="help">
+name: Ant build (jami-android/tests)
 
-    <!-- The local.properties file is created and updated by the 'android' tool.
-         It contains the path to the SDK. It should *NOT* be checked into
-         Version Control Systems. -->
-    <property file="local.properties"/>
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
-    <!-- The ant.properties file can be created by you. It is only edited by the
-         'android' tool to add properties to it.
-         This is the place to change some Ant specific build properties.
-         Here are some properties you may want to change/update:
+jobs:
+  ant-build:
+    runs-on: ubuntu-latest
 
-         source.dir
-             The name of the source directory. Default is 'src'.
-         out.dir
-             The name of the output directory. Default is 'bin'.
+    env:
+      ANDROID_CMDLINE_TOOLS_VERSION: "109.0.0"
+      ANDROID_API: "33"
+      BUILD_TOOLS_VERSION: "33.0.2"
+      # SDK path inside workspace (не используем runner.home)
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
 
-         For other overridable properties, look at the beginning of the rules
-         files in the SDK, at tools/ant/build.xml
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-         Properties related to the SDK location or the project target should
-         be updated using the 'android' tool with the 'update' action.
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip wget ant openjdk-17-jdk-headless pkg-config
 
-         This file is an integral part of the build system for your
-         application and should be checked into Version Control Systems.
+      - name: Prepare Android SDK dirs
+        run: |
+          mkdir -p "${ANDROID_SDK_ROOT}"
+          mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools"
+          echo "ANDROID_SDK_ROOT = ${ANDROID_SDK_ROOT}"
+        shell: bash
 
-         -->
-    <property file="ant.properties"/>
+      - name: Download Android command line tools
+        run: |
+          CMD_ZIP="/tmp/commandlinetools.zip"
+          wget -q -O "${CMD_ZIP}" "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" || \
+            wget -q -O "${CMD_ZIP}" "https://dl.google.com/android/repository/commandlinetools-linux-latest.zip"
+          unzip -q "${CMD_ZIP}" -d "${ANDROID_SDK_ROOT}/cmdline-tools-temp"
+          mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools/latest"
+          mv "${ANDROID_SDK_ROOT}/cmdline-tools-temp"/cmdline-tools/* "${ANDROID_SDK_ROOT}/cmdline-tools/latest/" || true
+          rm -rf "${ANDROID_SDK_ROOT}/cmdline-tools-temp" "${CMD_ZIP}"
+        shell: bash
 
-    <!-- if sdk.dir was not set from one of the property file, then
-         get it from the ANDROID_HOME env var.
-         This must be done before we load project.properties since
-         the proguard config can use sdk.dir -->
-    <property environment="env"/>
-    <condition property="sdk.dir" value="${env.ANDROID_HOME}">
-        <isset property="env.ANDROID_HOME"/>
-    </condition>
+      - name: Accept SDK licenses
+        run: |
+          export PATH="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools:${PATH}"
+          yes | "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" --licenses
+        shell: bash
 
-    <!-- The project.properties file is created and updated by the 'android'
-         tool, as well as ADT.
+      - name: Install Android platform & build-tools
+        run: |
+          export PATH="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools:${PATH}"
+          "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" "platform-tools" \
+            "platforms;android-${ANDROID_API}" "build-tools;${BUILD_TOOLS_VERSION}"
+          "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="${ANDROID_SDK_ROOT}" --list_installed || true
+        shell: bash
 
-         This contains project specific properties such as project target, and library
-         dependencies. Lower level build properties are stored in ant.properties
-         (or in .classpath for Eclipse projects).
+      - name: Export SDK env to job
+        run: |
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}" >> $GITHUB_ENV
+          echo "ANDROID_HOME=${ANDROID_SDK_ROOT}" >> $GITHUB_ENV
+          echo "PATH=${ANDROID_SDK_ROOT}/platform-tools:${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${PATH}" >> $GITHUB_ENV
+        shell: bash
 
-         This file is an integral part of the build system for your
-         application and should be checked into Version Control Systems. -->
-    <loadproperties srcFile="project.properties"/>
+      - name: Print Java & Ant versions
+        run: |
+          java -version || true
+          ant -version || true
+        shell: bash
 
-    <!-- quick check on sdk.dir -->
-    <fail
-            message="sdk.dir is missing. Make sure to generate local.properties using 'android update project' or to inject it through the ANDROID_HOME environment variable."
-            unless="sdk.dir"
-            />
+      - name: Show available ant targets in tests dir
+        run: |
+          cd jami-android/tests
+          ant -p
+        shell: bash
 
-    <!--
-        Import per project custom build rules if present at the root of the project.
-        This is the place to put custom intermediary targets such as:
-            -pre-build
-            -pre-compile
-            -post-compile (This is typically used for code obfuscation.
-                           Compiled code location: ${out.classes.absolute.dir}
-                           If this is not done in place, override ${out.dex.input.absolute.dir})
-            -post-package
-            -post-build
-            -pre-clean
-    -->
-    <import file="custom_rules.xml" optional="true"/>
+      - name: Run Ant build in jami-android/tests
+        run: |
+          cd jami-android/tests
+          # Если нужен конкретный target, замени 'debug' на нужный (или просто 'build')
+          ant debug || ant build || ant
+        shell: bash
+        timeout-minutes: 20
 
-    <!-- Import the actual build file.
+      - name: Find and upload APK artifacts
+        run: |
+          echo "List of APKs produced:"
+          find . -type f -name "*.apk" -print || true
+        shell: bash
 
-         To customize existing targets, there are two options:
-         - Customize only one target:
-             - copy/paste the target into this file, *before* the
-               <import> task.
-             - customize it to your needs.
-         - Customize the whole content of build.xml
-             - copy/paste the content of the rules files (minus the top node)
-               into this file, replacing the <import> task.
-             - customize to your needs.
-
-         ***********************
-         ****** IMPORTANT ******
-         ***********************
-         In all cases you must update the value of version-tag below to read 'custom' instead of an integer,
-         in order to avoid having your file be overridden by tools such as "android update project"
-    -->
-    <!-- version-tag: 1 -->
-    <import file="${sdk.dir}/tools/ant/build.xml"/>
-
-</project>
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ant-apks
+          path: '**/*.apk'
